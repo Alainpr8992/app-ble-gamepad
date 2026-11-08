@@ -40,7 +40,7 @@ class BridgeDashboard extends StatefulWidget {
 }
 
 class _BridgeDashboardState extends State<BridgeDashboard> {
-  // 6 EJES ANALÓGICOS DEL CONTROL (100% CAPTURADOS)
+  // 6 EJES ANALÓGICOS DEL CONTROL
   double lx = 0.0;
   double ly = 0.0;
   double rx = 0.0;
@@ -48,7 +48,7 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
   double lt = 0.0;
   double rt = 0.0;
 
-  // CONJUNTO DE TODOS LOS BOTONES ACTIVOS SIMULTÁNEAMENTE
+  // CONJUNTO DE BOTONES ACTIVOS
   final Set<String> activeButtons = {};
 
   StreamSubscription<GamepadEvent>? _gamepadSubscription;
@@ -102,15 +102,13 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
 
     if (upper.contains("ARROW UP") || upper == "UP") return "DPAD_ARRIBA";
     if (upper.contains("ARROW DOWN") || upper == "DOWN") return "DPAD_ABAJO";
-    if (upper.contains("ARROW LEFT") || upper == "LEFT")
-      return "DPAD_IZQUIERDA";
-    if (upper.contains("ARROW RIGHT") || upper == "RIGHT")
-      return "DPAD_DERECHA";
+    if (upper.contains("ARROW LEFT") || upper == "LEFT") return "DPAD_IZQUIERDA";
+    if (upper.contains("ARROW RIGHT") || upper == "RIGHT") return "DPAD_DERECHA";
 
     return upper.replaceAll("GAME BUTTON ", "").replaceAll("KEY ", "").trim();
   }
 
-  // CAPTURA NATIVA DE TECLADO / D-PAD
+  // 1. CAPTURA NATIVA DE TECLADO / GATILLOS DIGITALES
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     final keyName = _parseKeyName(event.logicalKey);
 
@@ -118,7 +116,11 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
       setState(() {
         activeButtons.add(keyName);
 
-        // Control por cruceta como respaldo
+        // Si Android manda los gatillos como teclas digitales:
+        if (keyName == "LT") lt = 1.0;
+        if (keyName == "RT") rt = 1.0;
+
+        // Cruceta
         if (keyName == "DPAD_ARRIBA") ly = 1.0;
         if (keyName == "DPAD_ABAJO") ly = -1.0;
         if (keyName == "DPAD_IZQUIERDA") lx = -1.0;
@@ -128,6 +130,10 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
     } else if (event is KeyUpEvent) {
       setState(() {
         activeButtons.remove(keyName);
+
+        if (keyName == "LT") lt = 0.0;
+        if (keyName == "RT") rt = 0.0;
+
         if (keyName.startsWith("DPAD")) {
           lx = 0.0;
           ly = 0.0;
@@ -138,7 +144,7 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
     return KeyEventResult.ignored;
   }
 
-  // CAPTURA DE TODOS LOS EJES ANALÓGICOS (PLUGIN GAMEPADS)
+  // 2. CAPTURA DE EJES ANALÓGICOS Y GATILLOS PROGRESIVOS
   void _initGamepadListener() {
     _gamepadSubscription = Gamepads.events.listen((event) {
       setState(() {
@@ -153,11 +159,36 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
         if (k == 'stick_right_x' || k == 'axis_2' || k == 'axis_z') rx = v;
         if (k == 'stick_right_y' || k == 'axis_3' || k == 'axis_rz') ry = -v;
 
-        // Gatillos analógicos (0.0 a 1.0)
-        if (k == 'trigger_left' || k == 'axis_4' || k == 'brake')
+        // GATILLO IZQUIERDO (LT / L2): Reconoce todas las variantes de Android
+        if (k.contains('brake') ||
+            k.contains('ltrigger') ||
+            k.contains('trigger_l') ||
+            k.contains('left_trigger') ||
+            k == 'axis_4' ||
+            k == 'axis_23') {
           lt = v.clamp(0.0, 1.0);
-        if (k == 'trigger_right' || k == 'axis_5' || k == 'throttle')
+          if (lt > 0.1) {
+            activeButtons.add("LT");
+          } else {
+            activeButtons.remove("LT");
+          }
+        }
+
+        // GATILLO DERECHO (RT / R2): Reconoce todas las variantes de Android
+        if (k.contains('throttle') ||
+            k.contains('gas') ||
+            k.contains('rtrigger') ||
+            k.contains('trigger_r') ||
+            k.contains('right_trigger') ||
+            k == 'axis_5' ||
+            k == 'axis_22') {
           rt = v.clamp(0.0, 1.0);
+          if (rt > 0.1) {
+            activeButtons.add("RT");
+          } else {
+            activeButtons.remove("RT");
+          }
+        }
 
         // Botones del plugin
         if (k.startsWith('button_')) {
@@ -172,31 +203,25 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
     });
   }
 
-  // TRANSMISIÓN TELEMÉTRICA 100% COMPLETA (30 HZ)
+  // 3. TELEMETRÍA BLE CONSTANTE A 30 HZ
   void _startTelemetryLoop() {
     _telemetryTimer = Timer.periodic(const Duration(milliseconds: 35), (timer) {
       if (rxCharacteristic != null && connectedEsp32 != null) {
-        // Conversión de ejes a escala entera estándar (-255 a +255)
         int iLx = (lx * 255).toInt().clamp(-255, 255);
         int iLy = (ly * 255).toInt().clamp(-255, 255);
         int iRx = (rx * 255).toInt().clamp(-255, 255);
         int iRy = (ry * 255).toInt().clamp(-255, 255);
 
-        // Gatillos de 0 a 255
         int iLt = (lt * 255).toInt().clamp(0, 255);
         int iRt = (rt * 255).toInt().clamp(0, 255);
 
-        // Zona muerta
+        // Zona muerta en sticks
         if (iLx.abs() < 25) iLx = 0;
         if (iLy.abs() < 25) iLy = 0;
         if (iRx.abs() < 25) iRx = 0;
         if (iRy.abs() < 25) iRy = 0;
 
-        // Lista de botones activos separados por '+' (ej: "A+RB")
-        String btnPayload =
-            activeButtons.isEmpty ? "NONE" : activeButtons.join("+");
-
-        // TRAMA UNIVERSAL TOTAL
+        String btnPayload = activeButtons.isEmpty ? "NONE" : activeButtons.join("+");
         String payload = "$iLx,$iLy,$iRx,$iRy,$iLt,$iRt,$btnPayload\n";
 
         try {
@@ -216,8 +241,7 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
 
     FlutterBluePlus.scanResults.listen((results) {
       setState(() {
-        scanResults =
-            results.where((r) => r.device.platformName.isNotEmpty).toList();
+        scanResults = results.where((r) => r.device.platformName.isNotEmpty).toList();
       });
     });
 
@@ -238,8 +262,7 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
     for (var service in services) {
       if (service.uuid.toString().toLowerCase() == serviceUuid.toLowerCase()) {
         for (var charac in service.characteristics) {
-          if (charac.uuid.toString().toLowerCase() ==
-              characteristicRxUuid.toLowerCase()) {
+          if (charac.uuid.toString().toLowerCase() == characteristicRxUuid.toLowerCase()) {
             rxCharacteristic = charac;
           }
         }
@@ -269,7 +292,7 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
       onKeyEvent: _handleKeyEvent,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('UPIIH Gamepad Gateway 100%'),
+          title: const Text('UPIIH Gamepad Gateway'),
           centerTitle: true,
           backgroundColor: const Color(0xFF1E293B),
         ),
@@ -278,18 +301,15 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // ESTADO
+              // TARJETA DE ESTADO
               _buildCard(
                 title: "ESTADO DEL ROBOT",
                 icon: Icons.memory,
-                color: connectedEsp32 != null
-                    ? Colors.greenAccent
-                    : Colors.orangeAccent,
+                color: connectedEsp32 != null ? Colors.greenAccent : Colors.orangeAccent,
                 content: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text("Estado: $espStatus",
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                    Text("Estado: $espStatus", style: const TextStyle(fontWeight: FontWeight.bold)),
                     const SizedBox(height: 10),
                     Row(
                       children: [
@@ -297,8 +317,7 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
                           focusNode: FocusNode(canRequestFocus: false),
                           onPressed: isScanning ? null : _startBleScan,
                           icon: const Icon(Icons.search),
-                          label: Text(
-                              isScanning ? "Buscando..." : "Buscar Robots"),
+                          label: Text(isScanning ? "Buscando..." : "Buscar Robots"),
                         ),
                         const SizedBox(width: 10),
                         if (connectedEsp32 != null)
@@ -316,8 +335,7 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
 
               // LISTA DE ROBOTS DISPONIBLES
               if (scanResults.isNotEmpty && connectedEsp32 == null) ...[
-                const Text("ROBOTS DETECTADOS:",
-                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text("ROBOTS DETECTADOS:", style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 ListView.builder(
                   shrinkWrap: true,
@@ -342,7 +360,22 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
                 const SizedBox(height: 14),
               ],
 
-              // RECONOCIMIENTO DE TODOS LOS BOTONES
+              // GATILLOS ANALÓGICOS (MONITOR VISUAL)
+              _buildCard(
+                title: "GATILLOS TRASEROS (LT / RT)",
+                icon: Icons.tune,
+                color: Colors.amberAccent,
+                content: Column(
+                  children: [
+                    _triggerBar("Gatillo Izquierdo (LT / Freno):", lt),
+                    const SizedBox(height: 8),
+                    _triggerBar("Gatillo Derecho (RT / Turbo):", rt),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+
+              // BOTONES ACTIVOS
               _buildCard(
                 title: "BOTONES PULSADOS SIMULTÁNEAMENTE",
                 icon: Icons.sports_esports,
@@ -352,10 +385,7 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
                   children: [
                     Text(
                       "ACTIVOS: ${activeButtons.isEmpty ? 'NINGUNO' : activeButtons.join(' + ')}",
-                      style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.yellowAccent),
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.yellowAccent),
                     ),
                     const SizedBox(height: 10),
                     Wrap(
@@ -381,30 +411,20 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
               ),
               const SizedBox(height: 14),
 
-              // TELEMETRÍA COMPLETA (6 EJES)
+              // TELEMETRÍA COMPLETA
               _buildCard(
-                title: "TELEMETRÍA COMPLETA (6 EJES)",
+                title: "TELEMETRÍA DE PALANCAS",
                 icon: Icons.speed,
                 color: Colors.cyanAccent,
                 content: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                        "Stick Izq:  LX: ${(lx * 255).toInt()} | LY: ${(ly * 255).toInt()}",
-                        style: const TextStyle(fontFamily: 'monospace')),
-                    Text(
-                        "Stick Der:  RX: ${(rx * 255).toInt()} | RY: ${(ry * 255).toInt()}",
-                        style: const TextStyle(fontFamily: 'monospace')),
-                    Text(
-                        "Gatillos:   LT: ${(lt * 255).toInt()} | RT: ${(rt * 255).toInt()}",
-                        style: const TextStyle(fontFamily: 'monospace')),
+                    Text("Stick Izq:  LX: ${(lx * 255).toInt()} | LY: ${(ly * 255).toInt()}", style: const TextStyle(fontFamily: 'monospace')),
+                    Text("Stick Der:  RX: ${(rx * 255).toInt()} | RY: ${(ry * 255).toInt()}", style: const TextStyle(fontFamily: 'monospace')),
                     const SizedBox(height: 8),
                     Text(
-                      "Trama BLE: [ ${(lx * 255).toInt()},${(ly * 255).toInt()},${(rx * 255).toInt()},${(ry * 255).toInt()},${(lt * 255).toInt()},${(rt * 255).toInt()},${activeButtons.isEmpty ? 'NONE' : activeButtons.join('+')} ]",
-                      style: const TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 11,
-                          color: Colors.white70),
+                      "Trama BLE enviada: [ ${(lx * 255).toInt()},${(ly * 255).toInt()},${(rx * 255).toInt()},${(ry * 255).toInt()},${(lt * 255).toInt()},${(rt * 255).toInt()},${activeButtons.isEmpty ? 'NONE' : activeButtons.join('+')} ]",
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Colors.white70),
                     ),
                   ],
                 ),
@@ -416,6 +436,31 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
     );
   }
 
+  // BARRA DE PROGRESO DE LOS GATILLOS
+  Widget _triggerBar(String label, double value) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label, style: const TextStyle(fontSize: 12)),
+            Text("${(value * 100).toInt()}%  (${(value * 255).toInt()})",
+                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.amberAccent)),
+          ],
+        ),
+        const SizedBox(height: 4),
+        LinearProgressIndicator(
+          value: value,
+          minHeight: 8,
+          backgroundColor: Colors.white12,
+          color: Colors.amberAccent,
+          borderRadius: BorderRadius.circular(4),
+        ),
+      ],
+    );
+  }
+
   Widget _buttonBadge(String name) {
     bool isPressed = activeButtons.contains(name);
     return AnimatedContainer(
@@ -424,8 +469,7 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
       decoration: BoxDecoration(
         color: isPressed ? Colors.greenAccent : const Color(0xFF334155),
         borderRadius: BorderRadius.circular(8),
-        border:
-            Border.all(color: isPressed ? Colors.green : Colors.transparent),
+        border: Border.all(color: isPressed ? Colors.green : Colors.transparent),
       ),
       child: Text(
         name,
@@ -438,11 +482,7 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
     );
   }
 
-  Widget _buildCard(
-      {required String title,
-      required IconData icon,
-      required Color color,
-      required Widget content}) {
+  Widget _buildCard({required String title, required IconData icon, required Color color, required Widget content}) {
     return Card(
       color: const Color(0xFF1E293B),
       shape: RoundedRectangleBorder(
@@ -458,11 +498,7 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
               children: [
                 Icon(icon, color: color, size: 20),
                 const SizedBox(width: 8),
-                Text(title,
-                    style: TextStyle(
-                        color: color,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13)),
+                Text(title, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
               ],
             ),
             const Divider(color: Colors.white24, height: 16),
