@@ -149,13 +149,31 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
         final k = event.key.toLowerCase();
         final v = event.value;
 
-        // Stick Izquierdo
-        if (k == 'stick_left_x' || k == 'axis_0') { lx = v; }
-        if (k == 'stick_left_y' || k == 'axis_1') { ly = -v; }
+        // -----------------------------
+        //  *** PARTE CORREGIDA ***
+        // -----------------------------
+        // Factor de suavizado (entre 0 y 1). 0.15 ofrece una respuesta ágil pero sin saltos bruscos.
+        const double smoothFactor = 0.15;
 
-        // Stick Derecho
-        if (k == 'stick_right_x' || k == 'axis_2' || k == 'axis_z') { rx = v; }
-        if (k == 'stick_right_y' || k == 'axis_3' || k == 'axis_rz') { ry = -v; }
+        // Stick Izquierdo (X, Y)
+        if (k == 'stick_left_x' || k == 'axis_0') {
+          lx = lx + (v - lx) * smoothFactor;          // interpolación lineal
+        }
+        if (k == 'stick_left_y' || k == 'axis_1') {
+          // El eje Y del Gamepad está invertido; lo corregimos y suavizamos.
+          ly = ly + ((-v) - ly) * smoothFactor;
+        }
+
+        // Stick Derecho (X, Y) – ahora sí se procesa.
+        if (k == 'stick_right_x' || k == 'axis_2' || k == 'axis_z') {
+          rx = rx + (v - rx) * smoothFactor;
+        }
+        if (k == 'stick_right_y' || k == 'axis_3' || k == 'axis_rz') {
+          ry = ry + ((-v) - ry) * smoothFactor;
+        }
+        // -----------------------------
+        // Fin de la parte corregida
+        // -----------------------------
 
         // GATILLO IZQUIERDO DIGITAL (LT / L2)
         if (k.contains('brake') ||
@@ -397,7 +415,7 @@ class _BridgeDashboardState extends State<BridgeDashboard> {
               ),
               const SizedBox(height: 14),
 
-              // TELEMETRÍA COMPLETA
+              // TELEMETRÍA DE PALANCAS
               _buildCard(
                 title: "TELEMETRÍA DE PALANCAS",
                 icon: Icons.speed,
